@@ -393,7 +393,7 @@ in steps:
    |  +-----------+                    |  +-----------+                          |  +-----------+
    +->| base addr |--+                 +->| base addr |--+ <- update base addr   +->| base addr |--+ <- align %n here
       +-----------+  |                    +-----------+  |                          +-----------+  |
-      | ret addr  |  |                    | ret addr  |<-+                          | yippeeeee |<-+
+      | ret addr  |  |                    | ret addr  |<-+                          | yippeeeee |<-+ <- to write data here
       +-----------+  |                    +-----------+                             +-----------+
       |           |  |                    |           |                             |           |
       |           |  |                    |           |                             |           |
