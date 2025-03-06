@@ -391,10 +391,10 @@ in steps:
    |  |           |                    |  |           |                          |  |           |
    |  |           |                    |  |           |                          |  |           |
    |  +-----------+                    |  +-----------+                          |  +-----------+
-   +->| base addr |--+                 +->| base addr |--+ <- update base addr   +->| base addr |--+ <- align %n here
-      +-----------+  |                    +-----------+  |                          +-----------+  |
-      | ret addr  |  |                    | ret addr  |<-+                          | yippeeeee |<-+ <- to write data here
-      +-----------+  |                    +-----------+                             +-----------+
+   +->| base addr |--+ <- to write     +->| base addr |--+ <- update base addr   +->| base addr |--+ <- align %n here
+      +-----------+  |    data here       +-----------+  |                          +-----------+  |
+      | ret addr  |  |                    | ret addr  |<-+                          | yippeeeee |<-+ <- to write
+      +-----------+  |                    +-----------+                             +-----------+       data here
       |           |  |                    |           |                             |           |
       |           |  |                    |           |                             |           |
       +-----------+  |                    +-----------+                             +-----------+
