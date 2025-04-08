@@ -410,3 +410,261 @@ in steps:
       | ret addr  |  |                    | ret addr  |  |                          | ret addr  |  |
       +-----------+  |                    +-----------+  |                          +-----------+  |
 ```
+
+__however__, this is partically incomplete, as addresses are typically comprised
+of 6 bytes, which gets _really large, really quickly_. recall that this number
+of bytes needs to be written in order for `%n` to write that value there. so,
+instead of writing upwards to 2.8e14 characters, it is instead quicker to write
+out the address in short-sized chunks, each using `%hn` instead
+
+that is, split a typical quad-word into a series of half-words, and write each
+half-word individually. in total, this takes more requests, but is actually
+possible to print out the number of characters to represent a full address
+
+ie.
+
+```
+|                 64 bits, storing some data                     |
+.                                                                .
+:                                                                 \
+`                                                                  `
+| 16 bit part    | 16 bit part    | 16 bit part    | 16 bit part    |
+```
+
+looking at the memory of this program specfically, the following stack can be
+seen at the `printf` call
+
+```
++edit_user---------------+ -,
+|                        |  |
+| <locals>               |   } 64B
+|                        |  |
++------------------------+ -;
+| base address           |   } 8B
++------------------------+ -;
+| return address         |   } 8B
++vuln--------------------+ -;
+| <locals, 16B>          |  |
+| +s_flag------+ -,      |  |
+| | <bytes of  |  |      |  |
+| |  the flag> |   } 64B |   } 96B
+| |            |  |      |  |
+| +------------+ -`      |  |
+|                        |  |
++------------------------+ -;
+| base address           |   } 8B
++------------------------+ -;
+| return address         |   } 8B
++main--------------------+ -;
+| base address           |   } 8B
++------------------------+ -;
+| return address         |   } 8B
++more stack...-----------+ -;
+|                        |  |
+           ...
+```
+
+as a result, it is possible to abuse the multiple base addresses on the stack in
+order to write arbitrary data into memory, as long as the write occurs to the
+8th address down the stack (assuming the address pointed to by `rsp` is index
+zero, or the 13th overall argument of the `printf` function call.
+
+this, unfortunately, is not the end of the process, however. unlike above, where
+offset specifiers were used to shorten the payload string, each individual
+argument must have an associated format specifier.
+
+that is, writing `0x7ff` characters out, then using something like `%$13hn` would
+_not_ result in writing `0x7ff` to the next base address. it, instead, performs
+absolutely no write whatsoever. no idea why, possibly becuase it resolves
+format-specified arguments first? not sure, would be cool to look into, but
+probably later. as a result, each argument must be associated to some format
+specifier.
+
+this causes some issues, for the two core reasons
+
+1. memory and registers typically contain random or inconsistent values,
+   especially when exploring other stack frames
+2. format string specifiers are made to print stuff. as a result, whatever is in
+   that register or address of memory can appear differently at runtime
+
+these two reasons makes it difficult to perform arbitrary data writes, as `%n`
+specifically _writes the number of bytes written up to that point_.
+
+however, there are a few format specifiers that can be used such that the number
+of characters being printed, and thus the value that the `%n` specifier will
+write, is predictable. the easiest option is `%c`, which is the format specifier
+to write a single character. this means that no matter the value at the address,
+the value will be casted into a single-byte character, and printed accordingly.
+
+> note, this _does not change_ the number of arguments necessary, as although a
+> character is aligned to a single byte, each argument is still assumed to be
+> aligned to a double word
+
+with this, the number of characters written out can also be controlled by
+using additional format specifiers. specifically, writing some value `<val>`
+into the specifier in the following way, `%<val>c`, will ensure that the
+specifier prints specifically `<val>` number of bytes.
+
+therefore, to write to the address that's being pointed to, the following
+payload can be used to write `0x7ff` to the address pointed to by the base
+address.
+
+```c
+"%c%c%c%c%c%c%c%c%c%c%c%2036c%hhn"
+// note, 2036 is actually 0x7f4. however, the 11 additional characters being
+// written by the first 11 specifiers ensures that 0x7ff characters are printed,
+// and, in turn, 0x7ff is written
+```
+
+right now, though, this only modifies the base address of the next stack frame.
+using an example:
+
+```
+                +-----------+ .
+0x7fff 1000     |           |  |
+                     ...        } 48 bytes
+                |           |  |
+                +-----------+ `
+0x7fff 1030  +--|0x7fff 1098|
+             |  +-----------+
+0x7fff 1038  |  | ret addr  |-----> some instruction
+             |  +-----------+ .
+             |  |           |  |
+             |       ...        } 96 bytes
+             |  |           |  |
+             |  +-----------+ `
+0x7fff 1098  +->|0x7fff 10b8|--+
+                +-----------+  |
+0x7fff 10a0     | ret addr  |--+--> some instruction
+                +-----------+  Y
+                ... down to the specified address
+```
+
+using the payload above, the stack will be updated to look like the following
+once completing the `%hhn` format specifier, will look like the following:
+
+```
+                ... up to the specified address
+                +-----------+  |
+0x7fff 1000     |           |  |
+                     ...       |
+                |           |  |
+                +-----------+  |
+0x7fff 1030  +--|0x7fff 1098|  |
+             |  +-----------+  ^
+0x7fff 1038  |  | ret addr  |--+--> some instruction
+             |  +-----------+  |
+             |  |           |  |
+             |       ...       |
+             |  |           |  |
+             |  +-----------+  |
+0x7fff 1098  +->|0x7fff 07ff|--+
+                +-----------+
+0x7fff 10a0     | ret addr  |-----> some instruction
+                +-----------+
+```
+
+this doesn't immediately give the write that we wanted, but, because the base
+address is already pointing to someplace on the stack, we can use a single write
+to update it, and point to where we actually want to write to. in the running
+example, the short `0x1030` can be used to point to the return address. this
+looks like:
+
+```
+                +-----------+ .                                             +-----------+
+0x7fff 1000     |           |  |                            0x7fff 1000     |           |
+                     ...        } 48 bytes                                       ...
+                |           |  |                                            |           |
+                +-----------+ `                                             +-----------+
+0x7fff 1030  +--|0x7fff 1098|                               0x7fff 1030  +--|0x7fff 1098|
+             |  +-----------+                                            |  +-----------+
+0x7fff 1038  |  | ret addr  |-----> some instruction        0x7fff 1038  |  | ret addr  |<-+ --> some random data
+             |  +-----------+ .                                          |  +-----------+  |
+             |  |           |  |                                         |  |           |  |
+             |       ...        } 96 bytes                               |       ...       |
+             |  |           |  |                                         |  |           |  |
+             |  +-----------+ `                                          |  +-----------+  |
+0x7fff 1098  +->|0x7fff 10b8|--+                            0x7fff 1098  +->|0x7fff 1030|--+
+                +-----------+  |                                            +-----------+
+0x7fff 10a0     | ret addr  |--+--> some instruction        0x7fff 10a0     | ret addr  |-----> some instruction
+                +-----------+  Y                                            +-----------+
+                ... down to the specified address
+```
+
+now, we can use _this new address_ to write the desired arbitrary data. this can
+be done in a few ways in this circumstance, since the `printf` call occurs
+within a loop. using this loop, it is possible to then reference the controlled
+base address we updated to write to the return address. this is also only true
+because the base address is never updated again as the function owning the stack
+frame never returns. the second method is a lot simpler, however.
+
+it is actually possible to continue to payload from before to perform both
+desired writes. that is, the update to the controlled base address and the write
+to the desired location can occur within a single `printf` call. this just
+requires more format specifiers until the right argument is selected, very
+similar to before.
+
+something to keep in mind, however, `%n` will print the __total__ number of
+characters written. as a result, the characters written for the previous
+`printf` payload needs to be counted as well. if necessary, the count of
+characters written can be overflowed to write the desired value. in a more
+mathematical form, assuming that a `short` is being written. otherwise, a single
+byte would bitwise OR with `0x100` instead of `0x10000`
+
+```
+characters to write = ((desired value) | 0x10000) - (previous character count)
+```
+
+therefore, writing `0x0000`, now at the example stack above, will have the
+following payload
+
+```c
+"%c%c%c%c%c%c%c%c%c%c%c%4133%hhn%c%c%c%c%c%c%c%c%c%c%61382c%hhn"
+//                           ^                       ^      ^
+//                           |                       |      ` write to the return address
+//                           |                       ` writing 0xefc6, where 0x1030 + 0xefd0 + 10 = 0x10000
+//                           ` update the base address, writing 0x1030 characters in all
+```
+
+this results in the following stack
+
+```
+                +-----------+
+0x7fff 1000     |           |
+                     ...
+                |           |
+                +-----------+
+0x7fff 1030  +--|0x7fff 1098|
+             |  +-----------+
+0x7fff 1038  |  |0x???? 0000|<-+ --> some desired data
+             |  +-----------+  |
+             |  |           |  |
+             |       ...       |
+             |  |           |  |
+             |  +-----------+  |
+0x7fff 1098  +->|0x7fff 1030|--+
+                +-----------+
+0x7fff 10a0     | ret addr  |-----> some instruction
+                +-----------+
+```
+
+this is limited, however, only two bytes are being written at a time. in this
+case, we are lucky since the `printf` call would be repeated. in other cases, it
+may be necessary to also overwrite the return address of the current stack frame
+to call `printf` again, but that will not be covered in this writeup
+
+as codeflow will now return to the `printf` call, different format string
+payloads can be used. it is important to note that the number of bytes being
+written, that being the sizeof the data type being referened, should be added
+per call to point to the right offset of off the data.
+
+that is:
+
+```
+0x07ff 3210     | 16 bit part    | 16 bit part    | 16 bit part    | 16 bit part    |
+                 ^                ^                ^                ^
+1.               |                |                |                ` write to offset 0 (0x07ff3210)
+2.               |                |                ` write to offset 2 (0x07ff3212)
+3.               |                ` write to offset 4 (0x07ff3214)
+4.               ` write to offset 6 (0x07ff3216)
+```
