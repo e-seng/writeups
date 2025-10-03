@@ -668,3 +668,10 @@ that is:
 3.               |                ` write to offset 4 (0x07ff3214)
 4.               ` write to offset 6 (0x07ff3216)
 ```
+
+from here, it is then possible to create a ROP chain that can spawn a shell,
+since it is now possible to write arbitrary bytes to the stack. For more
+information on ROP chains, I'll try to go into more details in my ROP writeup
+
+that being said, now that we have a shell, a new flag can be submitted
+`magpieCTF{s3c0nd_3ntr@nc3}`
