@@ -145,7 +145,8 @@ required that the format string payload is shorter in length than that of the
 first input, preventing an overwrite of the address we spent time to place into
 the stack.
 
-The following is what the stack looks like after each string is read:
+The following is what the stack looks like after each string is read, using big
+endian for readability
 
 After reading the "hash" of the replay
 
@@ -182,9 +183,9 @@ After reading the "name" of the replay
 ```
             ,-stack----------,
             |      ...       |
-str_buf --> |aaaaaaaaaaaaaaaa|
-            |aaaaaaaaaaaaaaaa|
-            |aaaaaaaaaaaaaaaa|
+str_buf --> | p a y l o a d  |
+            | g o e s   h e r|
+            | e : >aaaaaaaaaa|
             |aaaaaaaaaaaaaaaa|
             |aaaaaaaaaaaaaaaa|
             |aaaaaaaaaaaaaaaa|
