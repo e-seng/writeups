@@ -25,7 +25,7 @@ $ pwn checksec dist/analyzer
 
 ## functionality
 
-This binary was designed to parse an Osu! replay (`.osr`) file. In particular,
+This binary was designed to parse an osu! replay (`.osr`) file. In particular,
 the contents of the binary data file are to be hexdumped into `stdin`, all on
 one line. The binary contains a string specifying the expected usage
 
@@ -54,7 +54,8 @@ Once the input has been read, the hex is decoded to raw bytes for further
 processing.
 
 <!-- TODO: write more about the `OSR` file, linking to the OSU wiki with
-information on the internally represented data -->
+information on the internally represented data. then link it to the several
+functions sprinkled across the binary to parse those items -->
 
 From the replay file alone, the program is able to extract some metadata, namely
 the following items.
@@ -121,4 +122,87 @@ GOT protection: Partial RELRO | Found 16 GOT entries passing the filter
 [0x404080] setvbuf@GLIBC_2.2.5 -> 0x7f0187c815f0 (setvbuf) ◂— endbr64
 [0x404088] getline@GLIBC_2.2.5 -> 0x7f0187c61db0 (getline) ◂— endbr64
 [0x404090] exit@GLIBC_2.2.5 -> 0x401120 ◂— endbr64
+```
+
+Although most GOT entries point to `libc` address space, some point to the
+binary itself. As a result, it is in fact possible to write into the GOT such
+that the function loops itself, allowing us to call `main` (or an address within
+`main`) once more and perform additional format string exploits.
+
+> TODO
+> 
+> I'm unsure why some GOT entries are placed within the scope of the binary,
+> would be worth researching for the write-up
+
+A small blocker to this would be that there is no address pointing to the GOT
+entry within the stack at the time we call. This is easily remedied however as
+we can introduce such a pointer into the stack before the `printf` call is
+performed. This could be done all in one call, but in my solve script, I opt to
+write the address of the GOT entry I want to poison, `seccomp_release` in my
+case, with two inputs. First using the prompt to read the replay file's hash,
+then writing my format string payload in a second. With these steps, it's
+required that the format string payload is shorter in length than that of the
+first input, preventing an overwrite of the address we spent time to place into
+the stack.
+
+The following is what the stack looks like after each string is read:
+
+After reading the "hash" of the replay
+
+```
+            ,-stack----------,
+            |      ...       |
+str_buf --> |aaaaaaaaaaaaaaaa|
+            |aaaaaaaaaaaaaaaa|
+            |aaaaaaaaaaaaaaaa|
+            |aaaaaaaaaaaaaaaa|
+            |aaaaaaaaaaaaaaaa|
+            |aaaaaaaaaaaaaaaa|
+            |aaaaaaaaaaaaaaaa|
+            |aaaaaaaaaaaaaaaa|
+            |      ...       |
+            |aaaaaaaaaaaaaaaa|
+            |aaaaaaaaaaaaaaaa|
+            |aaaaaaaaaaaaaaaa|
+        +---|0000000000404060|
+        |   |      ...       |
+        |   '----------------'
+        |          ...
+        |   ,-got------------,
+        |   |      ...       |
+        |   |00007f0187c707f0| --> printf @ libc
+        +-->|00000000000401c0| --> seccomp_release thunk
+            |00007f0187d98610| --> __memset_avx2_unaligned_erms @ libc
+            |      ...       |
+            '----------------'
+```
+
+After reading the "name" of the replay
+
+```
+            ,-stack----------,
+            |      ...       |
+str_buf --> |aaaaaaaaaaaaaaaa|
+            |aaaaaaaaaaaaaaaa|
+            |aaaaaaaaaaaaaaaa|
+            |aaaaaaaaaaaaaaaa|
+            |aaaaaaaaaaaaaaaa|
+            |aaaaaaaaaaaaaaaa|
+            |aaaaaaaaaaaaaaaa|
+            |aaaaaaaaaaaaaaaa|
+            |      ...       |
+            |aaaaaaaaaaaaaaaa|
+            |aaaaaaaaaaaaaaaa|
+            |aaaaaaaaaaaaaaaa|
+        +---|0000000000404060|
+        |   |      ...       |
+        |   '----------------'
+        |          ...
+        |   ,-got------------,
+        |   |      ...       |
+        |   |00007f0187c707f0| --> printf @ libc
+        +-->|00000000000401c0| --> seccomp_release thunk
+            |00007f0187d98610| --> __memset_avx2_unaligned_erms @ libc
+            |      ...       |
+            '----------------'
 ```
