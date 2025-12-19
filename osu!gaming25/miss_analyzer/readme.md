@@ -66,7 +66,7 @@ wiki](https://osu.ppy.sh/wiki/en/Client/File_formats/osr_%28file_format%29).
 This shows that the data contained within the file is expected to be written in
 a specific order, following both fixed and variable data sizes.
 
-Using Binary Ninja ([\*_cough_\*](https://youtu.be/j69knNADinw)), we can look at
+Using Binary Ninja\*, we can look at
 the implementation of each of these parsers, starting at the most basic and
 move our way up.
 
@@ -74,7 +74,68 @@ move our way up.
 
 ![](screenshots/read_byte_decomp_binja.png)
 
+This primitive is immediately fairly simple, but shows the general approach for
+parsing out data. The function reads a byte from the buffer _if and only if_ the
+length of the read buffer is non-zero. Once read, the head of the buffer is
+incremented, and the count is decremented. As both the buffer and count are
+passed in by reference, this update is made to ensure that subsequent calls read
+the most relevant data, but also avoids performing an out-of-bound read.
 
+For a single byte? This is just done once. Evidently, for larger data types,
+additional bytes will have to be read in at a given time. What is nice, however,
+is that this primitive is used _within_ all other parsers. Therefore, all
+parsers operate in a similar manner
+
+### Short parser
+
+![](screenshots/read_short_decomp_binja.png)
+
+As previosuly alluded to, this parser namely calls `read_byte` twice to read the
+lower significant, than most signifcant byte of the short, in that order. For
+one reason or another, the most significant byte is multiplied by the _float_
+`256.0`, rather than just an 8-bit shift, then added to the lower byte. Either
+way, this achieves the operation of extracting two bytes, in little endian
+order, and generating the corresponding short.
+
+### String parser
+
+This component is the most complex of the three parsers within the binary, but
+the documentation on the osu! wiki helps out greatly here.
+
+> Has three parts; a single byte which will be either 0x00, indicating that the
+> next two parts are not present, or 0x0b (decimal 11), indicating that the next
+> two parts are present. If it is 0x0b, there will then be a ULEB128,
+> representing the byte length of the following string, and then the string
+> itself, encoded in UTF-8. See UTF-8
+
+As such, we can look at each of these three parts to the string parser
+
+![](screenshots/read_string_decomp_binja_0.png)
+
+This first chunk determines if the string buffer is even present in the file. If
+it is, the parser (and file format, for that matter), expects this byte to be
+`0x0b` if the string is present or `0x00` if not.
+
+![](screenshots/read_string_decomp_binja_1.png)
+
+Given that the string is found within the buffer, the parser will try to
+determine the length of the string. As specified within the documentation, this
+string length is specified using the
+[ULEB128](https://en.wikipedia.org/wiki/LEB128) data type format. Wikipedia has
+really good pseudocode to generate/parse these formats, but the tldr would be
+that this data format allows an integer to be represented by chunks of 7 bits,
+using the most significant bit as an indicator there exist future chunks
+corresponding to the value.
+
+![](screenshots/read_string_decomp_binja_2.png)
+
+Last but not least, once we get the actual length of the string, we can read
+_out_ the bytes into a buffer passed in by reference.
+
+Importantly, this out buffer _is_ on the stack of the caller function (which
+would be the `main` function in our case), but the size of the out buffer is
+specified, and the length of the data read to the buffer is the minimum between
+the string length and buffer size. Therefore, no out-of-bound writes
 
 Each of these data points are printed to the terminal immediately after parsing
 that part of the file.
@@ -88,6 +149,8 @@ beginning of the program, which namely are `execve` and `stub_execveat`. This
 would namely mean that the program would be disallowed from spawning new
 processes. This does not affect anything in our current program flow, but, as a
 spoiler, it makes things a little less fun. (\*_cough_\*)
+
+<!--todo: show the main function in some meaningful way-->
 
 ## vulnerabilities
 
@@ -239,4 +302,6 @@ str_buf --> |7061796c6f616420|     |payload |
             '----------------'
 ```
 
-This means, the name of the replay can be specified
+
+> \* I was given a year's license to use Binary Ninja for ICC 2025 under the
+> condition I create this writeup. So, ([\*_cough_\*](https://youtu.be/j69knNADinw))
