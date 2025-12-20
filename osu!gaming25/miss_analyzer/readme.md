@@ -137,6 +137,10 @@ would be the `main` function in our case), but the size of the out buffer is
 specified, and the length of the data read to the buffer is the minimum between
 the string length and buffer size. Therefore, no out-of-bound writes
 
+The function copys either the string length and the buffer size, whichever's
+greater, into the outpur buffer. In the case that the former is larger, it
+finsihes by consuming the remaining bytes in the stream before returning.
+
 Each of these data points are printed to the terminal immediately after parsing
 that part of the file.
 
@@ -163,14 +167,14 @@ arbitrary read and arbitrary write vulnerability.
 
 ## exploitation
 
-Admittedly I was at a loss as the `printf` is only found in the main function
-call. This would entail that a chain of base addresses would be unavailable,
-blocking an immediate write to a return address. However, as the binary is
-position _dependent_ and has Partial RELRO. This means that there may be a GOT
-entry that we could abuse to start playing around with
+Admittedly I was at a loss at first as there was no apparent way to overwrite
+the return address, enabling arbitrary code flow. From what I saw, the code was
+very memory secure, and the `printf` function call eqs done in aain, entailing
+no series of base addresses to abuse. However, as the binary is position
+_dependent_ and has Partial RELRO. This means that there may be a GOT entry that
+we could abuse to start playing around with
 
-```
-pwndbg> got
+``` pwndbg> got
 Filtering out read-only entries (display them with -r or --show-readonly)
 
 State of the GOT of /home/user/files/dist/analyzer_patched:
@@ -227,6 +231,17 @@ following:
 > tldr, _this_ is the reason why relocation tables are writable - to improve
 > binary startup performance. However, modern compilers typically opt to resolve
 > address entries _immediately at load_ and ensure the GOT is read-only
+
+Of these unresved GOT entries, `seccomp_release` was the most promising as it
+was called oractically at the end of the function. Since it currently pointed to
+`0x4010c0`, we can simplely overwrite the least significant short of that
+address such that it points to the start of `main`. Pointing the function call
+there achirves two things:
+
+- Multiple calls to input and `printf`, which we can further abuse
+- ensure that the location of our format specifier is aligned to an 16-byte
+  address to keep `printf` happy
+    - failure to do so will cause the bianry to crash
 
 A small blocker to this would be that there is no address pointing to the GOT
 entry within the stack at the time we call. This is easily remedied however as
@@ -302,6 +317,39 @@ str_buf --> |7061796c6f616420|     |payload |
             '----------------'
 ```
 
+in my solve script specifically, the address to the `seccomp_release` entry is
+places `0x28` quadwords below the top of the stack. Eith this knowledge, we can
+build up our format string payload.
+
+We want to definitely leak some addresses o  the stack, namely the following:
+
+- An address pointing to somewhere in `libc`
+    - Specifically, `%53$llx`, which gives us the return address to
+      `__libc_start_main`.
+- An address pointing to somewhere in the stack
+    - Specifically, `%6$llx`, which points to the start of the buffer containing
+      our raw input.
+
+We also want to point the GOT entry for `seccomp_release`. Accounting for the
+bytes written out by our address leaks, we get the following payload which ties
+everything together.
+
+```py
+f"%53$llx.%6$llx.%{exe.sym['main']&0xffff-22}u%46$hn"
+# |       |        |                      |    `- Write to the address at argument 46
+# |       |        |                      `- account for the previous number of bytes printed
+# |       |        `- Write out the two LSB of the main address
+# |       `- Stack address leak
+# `- libc leak
+```
+
+Now equipped with multiple arbitrary writes, and the locations of `libc` and the
+stack, we can now create a ROP chain and win!
+
+Well... with the caviat that there are seccomp rules in place which disable the
+use of either `execve` and `execveat`, which disables the use of `system` or
+other typical methods to spawn a shell. Therefore, out ROP chain must be one
+to read and print out `flag.txt`
 
 > \* I was given a year's license to use Binary Ninja for ICC 2025 under the
 > condition I create this writeup. So, ([\*_cough_\*](https://youtu.be/j69knNADinw))
